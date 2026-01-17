@@ -34,6 +34,7 @@ def find_and_copy_all_dlls():
     cudnn_mapping = {
         "cudnn_ops64_9.dll": "cudnn_ops_infer64_8.dll",
         "cudnn_cnn64_9.dll": "cudnn_cnn_infer64_8.dll",
+        "cudnn_adv64_9.dll": "cudnn_adv_infer64_8.dll",  # CRITICAL: Advanced operations
         "cudnn64_9.dll": "cudnn64_8.dll"
     }
     
@@ -153,6 +154,7 @@ def find_and_copy_all_dlls():
     required_dlls = [
         "cudnn_ops_infer64_8.dll",
         "cudnn_cnn_infer64_8.dll",
+        "cudnn_adv_infer64_8.dll",  # CRITICAL: Advanced operations
         "cudnn64_8.dll",
         "cublas64_11.dll",
         "cublasLt64_11.dll",
@@ -188,8 +190,10 @@ def find_and_copy_all_dlls():
         print("   Relancez: python main_v25.py")
         print()
         print("💡 NOTE:")
-        print("   - cuDNN v9 renommée en v8 pour compatibilité faster-whisper")
+        print("   - cuDNN v9 renommée en v8 (ops, cnn, adv) pour compatibilité")
+        print("   - cudnn_adv_infer64_8.dll = opérations avancées (CRITIQUE)")
         print("   - zlibwapi.dll ajoutée pour résoudre 'Unknown dll missing'")
+        print("   - os.add_dll_directory() injecté dans main_v25.py")
         print("   - Toutes les DLLs chargées depuis le répertoire courant")
         print()
         return True

@@ -7,11 +7,17 @@ Author: THE CLOSER PRO Team
 Version: 2.5.0 (Elite)
 """
 
+# CRITICAL: Force Windows to load DLLs from project directory FIRST
+import os
+if os.name == 'nt':
+    import ctypes
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    os.add_dll_directory(project_dir)
+
 import asyncio
 import signal
 import logging
 import sys
-import os
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
