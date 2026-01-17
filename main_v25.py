@@ -203,7 +203,7 @@ class TheCloserProV25:
             
             print(f"{Fore.CYAN}" + "="*70)
             print(f"{Fore.CYAN}╔═══════════════════════════════════════════════════════════════════╗")
-            print(f"{Fore.CYAN}║{Fore.WHITE}                 THE CLOSER PRO - V25 ELITE                        {Fore.CYAN}║")
+            print(f"{Fore.CYAN}║{Fore.WHITE}              THE CLOSER PRO - v0.25 (Core Engine)                {Fore.CYAN}║")
             print(f"{Fore.CYAN}║{Fore.WHITE}        Dual-Stream • Context Memory • Self-Healing GPU           {Fore.CYAN}║")
             print(f"{Fore.CYAN}╚═══════════════════════════════════════════════════════════════════╝")
             print(f"{Fore.CYAN}" + "="*70 + Style.RESET_ALL)
