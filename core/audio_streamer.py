@@ -14,6 +14,7 @@ from typing import Optional, Callable
 from dataclasses import dataclass
 
 from config.manager import get_config
+from core.audio_device_detector import get_audio_detector
 
 
 @dataclass
@@ -67,7 +68,72 @@ class AudioStreamer:
         self._dropped_chunks = 0
         self._silence_start: Optional[float] = None
         
-        self.logger.info(f"AudioStreamer initialized - Device ID: {self.config.audio.device_id}")
+        # Auto-détection et validation du périphérique audio
+        self._validated_device_id = None
+        self._validated_channels = None
+        self._validate_audio_device()
+        
+        self.logger.info(f"AudioStreamer initialized - Device ID: {self._validated_device_id}")
+    
+    def _validate_audio_device(self):
+        """
+        Valide et corrige automatiquement la configuration audio.
+        Résout le bug PaErrorCode -9998 (Invalid number of channels).
+        """
+        detector = get_audio_detector()
+        
+        # Scanner les périphériques
+        detector.scan_devices()
+        
+        # Tenter de trouver VoiceMeeter automatiquement
+        vm_device = detector.find_voicemeeter_device(
+            require_stereo=True,
+            preferred_name="B1"
+        )
+        
+        if vm_device:
+            self.logger.info(f"VoiceMeeter auto-detected: {vm_device.name} (ID: {vm_device.id})")
+            device_id = vm_device.id
+        else:
+            # Fallback sur le device_id configuré
+            device_id = self.config.audio.device_id
+            self.logger.warning(
+                f"VoiceMeeter not auto-detected, using configured device ID: {device_id}"
+            )
+        
+        # Valider la configuration
+        validation = detector.validate_device_config(
+            device_id,
+            self.config.audio.channels,
+            self.config.audio.sample_rate
+        )
+        
+        if not validation['valid']:
+            self.logger.error(f"Device validation failed: {validation['message']}")
+            
+            # Ajuster automatiquement les canaux si possible
+            if 'suggested_channels' in validation:
+                suggested = validation['suggested_channels']
+                self.logger.warning(
+                    f"Auto-adjusting channels from {self.config.audio.channels} to {suggested}"
+                )
+                self._validated_channels = suggested
+            else:
+                # Fallback sur mono
+                self.logger.warning("Falling back to mono (1 channel)")
+                self._validated_channels = 1
+        else:
+            self.logger.info(f"Device validation passed: {validation['message']}")
+            self._validated_channels = self.config.audio.channels
+        
+        self._validated_device_id = device_id
+        
+        # Afficher la configuration finale
+        self.logger.info(
+            f"Final audio config: Device={self._validated_device_id}, "
+            f"Channels={self._validated_channels}, "
+            f"SampleRate={self.config.audio.sample_rate}"
+        )
     
     def _audio_callback(self, indata: np.ndarray, frames: int, time_info, status):
         """
@@ -158,9 +224,10 @@ class AudioStreamer:
             self.logger.info("Starting audio streamer...")
             
             try:
+                # Utiliser la configuration validée
                 self._stream = sd.InputStream(
-                    device=self.config.audio.device_id,
-                    channels=self.config.audio.channels,
+                    device=self._validated_device_id,
+                    channels=self._validated_channels,
                     samplerate=self.config.audio.sample_rate,
                     blocksize=int(self.config.audio.sample_rate * self.config.audio.chunk_duration),
                     callback=self._audio_callback,
@@ -180,9 +247,9 @@ class AudioStreamer:
                 
                 self.logger.info(
                     f"Audio streamer started successfully\n"
-                    f"  Device: {self.config.audio.device_id}\n"
+                    f"  Device: {self._validated_device_id}\n"
                     f"  Sample Rate: {self.config.audio.sample_rate} Hz\n"
-                    f"  Channels: {self.config.audio.channels}\n"
+                    f"  Channels: {self._validated_channels}\n"
                     f"  Chunk Duration: {self.config.audio.chunk_duration}s"
                 )
                 

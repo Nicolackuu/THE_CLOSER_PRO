@@ -18,12 +18,20 @@ from typing import Optional
 
 from colorama import init, Fore, Style
 
+# Apply CUDA DLL fix BEFORE any torch imports
+from core.cuda_dll_fixer import apply_cuda_fix
+apply_cuda_fix()
+
 from config.manager import get_config
 from core.audio_streamer import AudioStreamer, AudioChunk
 from core.dual_stream_manager import DualStreamManager, AudioStream
 from core.transcriber_v25 import get_elite_transcriber, TranscriptionResult
 from core.analytics_engine import AnalyticsEngine
 from core.processor import get_processor
+from core.sales_intelligence import get_sales_intelligence
+from core.realtime_ui import get_realtime_ui
+from core.vram_guardian import get_vram_guardian
+from core.session_exporter import get_session_exporter
 
 init(autoreset=True)
 
@@ -39,10 +47,14 @@ class TheCloserProV25:
         self.config = get_config()
         self.logger = self._setup_logging()
         
-        # Composants Elite
+        # Composants Elite v0.25
         self.transcriber = get_elite_transcriber()
         self.analytics = AnalyticsEngine(snapshot_interval=30)
         self.processor = get_processor()
+        self.sales_intelligence = get_sales_intelligence()
+        self.realtime_ui = get_realtime_ui()
+        self.vram_guardian = get_vram_guardian()
+        self.session_exporter = get_session_exporter()
         
         # Dual-stream manager
         self.dual_stream: Optional[DualStreamManager] = None
@@ -54,6 +66,9 @@ class TheCloserProV25:
         self._is_running = False
         self._output_file: Optional[Path] = None
         self._session_start: Optional[datetime] = None
+        
+        # Live monitoring
+        self._live_monitor_task: Optional[asyncio.Task] = None
         
         # Asyncio event loop
         self.loop: Optional[asyncio.AbstractEventLoop] = None
@@ -106,6 +121,13 @@ class TheCloserProV25:
                 cleaned = self.processor.clean_text(result.text)
                 
                 if cleaned and not self.processor.is_hallucination(cleaned):
+                    # Analyser avec Sales Intelligence
+                    self.sales_intelligence.analyze_text(
+                        text=cleaned,
+                        speaker="VOUS",
+                        timestamp=result.timestamp
+                    )
+                    
                     # Enregistrer dans analytics
                     self.analytics.record_speech(
                         speaker="VOUS",
@@ -137,16 +159,107 @@ class TheCloserProV25:
                 cleaned = self.processor.clean_text(result.text)
                 
                 if cleaned and not self.processor.is_hallucination(cleaned):
+                    # Analyser avec Sales Intelligence
+                    self.sales_intelligence.analyze_text(
+                        text=cleaned,
+                        speaker="CLIENT",
+                        timestamp=result.timestamp
+                    )
+                    
+                    # Enregistrer dans analytics
                     self.analytics.record_speech(
                         speaker="CLIENT",
                         duration=result.duration,
                         timestamp=result.timestamp
                     )
                     
+                    # Afficher
                     self._display_transcription(result, cleaned)
+                    
+                    # Alertes en temps réel pour objections/budgets
+                    self._check_realtime_alerts(cleaned)
                     
         except Exception as e:
             self.logger.error(f"Error processing right channel: {e}", exc_info=True)
+    
+    def _check_realtime_alerts(self, text: str):
+        """
+        Vérifie et affiche les alertes en temps réel.
+        
+        Args:
+            text: Texte à analyser
+        """
+        # Vérifier les nouvelles objections
+        if self.sales_intelligence.objections:
+            latest_objection = self.sales_intelligence.objections[-1]
+            if (datetime.now() - latest_objection.timestamp).total_seconds() < 2.0:
+                self.realtime_ui.display_objection_alert(
+                    objection_type=latest_objection.type,
+                    objection_text=latest_objection.text,
+                    severity=latest_objection.severity
+                )
+        
+        # Vérifier les nouveaux budgets
+        if self.sales_intelligence.budgets:
+            latest_budget = self.sales_intelligence.budgets[-1]
+            if (datetime.now() - latest_budget.timestamp).total_seconds() < 2.0:
+                self.realtime_ui.display_budget_alert(
+                    amount=latest_budget.amount,
+                    currency=latest_budget.currency,
+                    speaker=latest_budget.speaker
+                )
+        
+        # Vérifier les nouveaux accords
+        if self.sales_intelligence.agreement_points:
+            latest_agreement = self.sales_intelligence.agreement_points[-1]
+            if (datetime.now() - latest_agreement.timestamp).total_seconds() < 2.0:
+                self.realtime_ui.display_agreement_alert(
+                    agreement_text=latest_agreement.description
+                )
+    
+    async def _live_monitoring_loop(self):
+        """
+        Boucle de monitoring live.
+        Affiche le Talk-Ratio et les alertes en temps réel.
+        """
+        last_warning_check = None
+        
+        while self._is_running:
+            try:
+                # Calculer la durée de session
+                if self._session_start:
+                    session_duration = (datetime.now() - self._session_start).total_seconds()
+                else:
+                    session_duration = 0.0
+                
+                # Récupérer le ratio actuel
+                ratio = self.analytics.get_current_ratio()
+                
+                # Récupérer le smart summary
+                summary = self.sales_intelligence.get_smart_summary()
+                
+                # Afficher les stats live
+                self.realtime_ui.display_live_stats(
+                    vous_pct=ratio["vous_percentage"],
+                    client_pct=ratio["client_percentage"],
+                    session_duration=session_duration,
+                    objections_count=summary["objections"]["active"],
+                    last_agreement=summary["last_agreement"]
+                )
+                
+                # Vérifier et afficher les warnings (toutes les 30s)
+                if last_warning_check is None or (datetime.now() - last_warning_check).total_seconds() > 30:
+                    self.realtime_ui.check_and_display_warnings(ratio["vous_percentage"])
+                    last_warning_check = datetime.now()
+                
+                # Attendre avant la prochaine mise à jour
+                await asyncio.sleep(2.0)
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"Error in live monitoring loop: {e}", exc_info=True)
+                await asyncio.sleep(2.0)
     
     def _display_transcription(self, result: TranscriptionResult, text: str):
         """
@@ -220,6 +333,10 @@ class TheCloserProV25:
             # Démarrer analytics
             self.analytics.start_session()
             
+            # Démarrer VRAM Guardian
+            print(f"{Fore.YELLOW}[INIT]{Style.RESET_ALL} Activation du VRAM Guardian...")
+            await self.vram_guardian.start_monitoring()
+            
             # Créer le dual-stream manager
             print(f"{Fore.YELLOW}[INIT]{Style.RESET_ALL} Initialisation du système dual-stream...")
             self.dual_stream = DualStreamManager(
@@ -238,13 +355,18 @@ class TheCloserProV25:
             self._is_running = True
             self._session_start = datetime.now()
             
-            print(f"{Fore.GREEN}[READY]{Style.RESET_ALL} Système V25 opérationnel - Parlez maintenant !")
+            print(f"{Fore.GREEN}[READY]{Style.RESET_ALL} Système v0.25 Elite opérationnel - Parlez maintenant !")
             print(f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} Architecture: Dual-Stream Zero-Overlap")
-            print(f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} Analytics: Talk-to-Listen Ratio activé")
-            print(f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} GPU: Self-Healing activé")
+            print(f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} Intelligence: Entity & Objection Detection")
+            print(f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} Analytics: Live Talk-Ratio Monitoring")
+            print(f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} GPU: VRAM Guardian + Self-Healing")
             print(f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} Appuyez sur Ctrl+C pour arrêter\n")
-            print(f"{Fore.CYAN}" + "─"*70 + Style.RESET_ALL)
-            print()
+            
+            # Afficher l'en-tête de monitoring
+            self.realtime_ui.display_session_header()
+            
+            # Démarrer le monitoring live
+            self._live_monitor_task = asyncio.create_task(self._live_monitoring_loop())
             
         except Exception as e:
             self.logger.error(f"Startup failed: {e}", exc_info=True)
@@ -264,9 +386,20 @@ class TheCloserProV25:
         if self.audio_streamer:
             self.audio_streamer.stop()
         
+        # Arrêter le monitoring live
+        if self._live_monitor_task:
+            self._live_monitor_task.cancel()
+            try:
+                await self._live_monitor_task
+            except asyncio.CancelledError:
+                pass
+        
         # Arrêter le dual-stream
         if self.dual_stream:
             await self.dual_stream.stop()
+        
+        # Arrêter le VRAM Guardian
+        await self.vram_guardian.stop_monitoring()
         
         # Arrêter le transcripteur
         await self.transcriber.shutdown()
@@ -274,7 +407,49 @@ class TheCloserProV25:
         # Afficher les statistiques finales
         self._display_final_stats()
         
+        # Exporter la session
+        self._export_session_summary()
+        
         print(f"\n{Fore.GREEN}[DONE]{Style.RESET_ALL} Session terminée.")
+    
+    def _export_session_summary(self):
+        """
+        Exporte le résumé de session enrichi.
+        """
+        try:
+            # Calculer la durée
+            if self._session_start:
+                session_duration = (datetime.now() - self._session_start).total_seconds()
+            else:
+                session_duration = 0.0
+            
+            # Récupérer toutes les données
+            dashboard = self.analytics.get_dashboard_data()
+            intelligence = self.sales_intelligence.get_smart_summary()
+            transcriber_stats = self.transcriber.get_stats()
+            gpu_stats = self.transcriber.gpu_manager.get_performance_report()
+            
+            # Exporter
+            output_path = self.session_exporter.export_session(
+                analytics_data=dashboard,
+                intelligence_data=intelligence,
+                transcriber_stats=transcriber_stats,
+                gpu_stats=gpu_stats,
+                session_duration=session_duration,
+                transcription_file=self._output_file
+            )
+            
+            print(f"\n{Fore.GREEN}[EXPORT]{Style.RESET_ALL} Session summary: {output_path}")
+            
+            # Afficher les recommandations IA
+            recommendation = self.sales_intelligence.generate_ai_recommendation()
+            print(f"\n{Fore.CYAN}{'═'*70}")
+            print(f"{Fore.CYAN}AI RECOMMENDATIONS FOR FOLLOW-UP{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}{'═'*70}{Style.RESET_ALL}")
+            print(f"\n{recommendation}\n")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to export session summary: {e}", exc_info=True)
         if self._output_file:
             print(f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} Transcription: {self._output_file}\n")
     

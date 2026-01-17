@@ -61,3 +61,7 @@ secrets.yaml
 *.pth
 *.pt
 *.ckpt
+
+
+*.dll
+venv/

@@ -130,20 +130,35 @@ class DualStreamManager:
     async def submit_stereo_chunk(self, stereo_data: np.ndarray, timestamp: datetime):
         """
         Soumet un chunk stéréo et le sépare automatiquement.
+        Gère le fallback mono si le périphérique ne supporte pas le stéréo.
         
         Args:
-            stereo_data: Données audio stéréo (shape: [samples, 2])
+            stereo_data: Données audio stéréo (shape: [samples, 2]) ou mono (shape: [samples,])
             timestamp: Timestamp du chunk
         """
         if not self._is_running:
             raise RuntimeError("DualStreamManager not running")
         
-        # Séparation des canaux
+        # Gérer le cas mono (fallback si device ne supporte pas stéréo)
         if len(stereo_data.shape) == 1:
-            stereo_data = stereo_data.reshape(-1, 2)
-        
-        left_channel = stereo_data[:, 0].copy()
-        right_channel = stereo_data[:, 1].copy()
+            # Audio mono - dupliquer sur les deux canaux
+            self.logger.warning("Mono audio detected - duplicating to both channels (stereo not available)")
+            left_channel = stereo_data.copy()
+            right_channel = stereo_data.copy()
+        elif stereo_data.shape[1] == 1:
+            # Audio mono en format 2D
+            mono_data = stereo_data[:, 0]
+            left_channel = mono_data.copy()
+            right_channel = mono_data.copy()
+        elif stereo_data.shape[1] == 2:
+            # Audio stéréo normal
+            left_channel = stereo_data[:, 0].copy()
+            right_channel = stereo_data[:, 1].copy()
+        else:
+            # Plus de 2 canaux - prendre les 2 premiers
+            self.logger.warning(f"Multi-channel audio detected ({stereo_data.shape[1]} channels) - using first 2")
+            left_channel = stereo_data[:, 0].copy()
+            right_channel = stereo_data[:, 1].copy()
         
         duration = len(left_channel) / self.sample_rate
         
