@@ -1,0 +1,86 @@
+# THE CLOSER PRO - Requirements
+# Optimisé pour CUDA 12.1 et RTX 3070 Laptop
+
+# ============================================================================
+# CORE DEPENDENCIES - Transcription & Audio
+# ============================================================================
+
+# Faster-Whisper avec support CUDA
+faster-whisper==1.0.3
+
+# CTranslate2 (backend de Faster-Whisper) - Version CUDA 12
+ctranslate2==4.4.0
+
+# PyTorch avec CUDA 12.1 support
+# Installation via: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+torch>=2.1.0
+torchaudio>=2.1.0
+
+# Audio capture et traitement
+sounddevice==0.4.6
+numpy==1.26.4
+scipy==1.11.4
+
+# ============================================================================
+# TEXT PROCESSING - Fuzzy Matching & Cleanup
+# ============================================================================
+
+# RapidFuzz pour détection d'hallucinations
+rapidfuzz==3.6.1
+
+# ============================================================================
+# UTILITIES
+# ============================================================================
+
+# Configuration et logging
+pyyaml==6.0.1
+
+# ============================================================================
+# INSTALLATION NOTES
+# ============================================================================
+# 
+# ÉTAPE 1: Installer PyTorch avec CUDA 12.1
+# -----------------------------------------
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+#
+# ÉTAPE 2: Installer les autres dépendances
+# ------------------------------------------
+# pip install -r requirements.txt
+#
+# ÉTAPE 3: Vérifier l'installation CUDA
+# --------------------------------------
+# python -c "import torch; print(f'CUDA disponible: {torch.cuda.is_available()}'); print(f'Version CUDA: {torch.version.cuda}'); print(f'GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else "N/A"}')"
+#
+# ÉTAPE 4: Télécharger le modèle Whisper (automatique au premier lancement)
+# --------------------------------------------------------------------------
+# Le modèle distil-large-v3 (~1.5GB) sera téléchargé automatiquement
+# depuis HuggingFace lors du premier démarrage.
+#
+# ============================================================================
+# CONFIGURATION SYSTÈME RECOMMANDÉE
+# ============================================================================
+#
+# GPU: NVIDIA RTX 3070 Laptop (8GB VRAM)
+# CUDA: 12.1+
+# Driver: 535.xx ou supérieur
+# RAM: 16GB minimum
+# Python: 3.10 ou 3.11 (testé sur 3.11)
+#
+# ============================================================================
+# TROUBLESHOOTING
+# ============================================================================
+#
+# Si erreur "CUDA out of memory":
+# - Réduire compute_type de "float16" à "int8" dans config/manager.py
+# - Réduire beam_size de 5 à 3
+#
+# Si erreur "Device ID 33 not found":
+# - Lancer: python -m core.audio_streamer
+# - Identifier l'ID correct de VoiceMeeter Virtual B1
+# - Modifier device_id dans config/manager.py
+#
+# Si transcription en anglais malgré language="fr":
+# - Vérifier que initial_prompt est bien en français
+# - Augmenter la durée du buffer audio (plus de contexte)
+#
+# ============================================================================
