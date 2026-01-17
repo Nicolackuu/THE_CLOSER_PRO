@@ -42,20 +42,18 @@ class TranscriptionConfig:
         task: Type de tâche ('transcribe' ou 'translate')
         beam_size: Taille du beam search (5 = bon compromis vitesse/qualité)
         vad_filter: Activer le filtre Voice Activity Detection
+        min_silence_duration_ms: Durée minimale de silence pour VAD (en ms)
         initial_prompt: Prompt de conditionnement pour le contexte métier
     """
-    model_name: str = "distil-large-v3"
+    model_name: str = "large-v3"
     device: str = "cuda"
     compute_type: str = "float16"
     language: str = "fr"
     task: str = "transcribe"
     beam_size: int = 5
     vad_filter: bool = False
-    initial_prompt: str = (
-        "Session de Closing High-Ticket. Analyse des besoins et traitement d'objections. "
-        "Terminologie : Pipeline, Deal, Setter, Qualif, Go-High-Level, Prospect, "
-        "Objection, Close, Upsell, Downsell, Framework, ROI, Investissement."
-    )
+    min_silence_duration_ms: int = 500
+    initial_prompt: str = "Transcription en français uniquement. Ne pas traduire. Conversation de vente professionnelle."
 
 
 @dataclass
@@ -86,7 +84,17 @@ class ProcessingConfig:
                 "Mettez un pouce bleu",
                 "Sous-titrage",
                 "www.",
-                "http"
+                "http",
+                "Thank you",
+                "Thanks",
+                "Yes",
+                "No",
+                "I'm not",
+                "I don't",
+                "You know",
+                "Like and subscribe",
+                "Please subscribe",
+                "Click the bell"
             ]
 
 

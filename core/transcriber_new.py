@@ -191,35 +191,81 @@ class WhisperTranscriber:
     def _transcribe_audio(self, audio_data: np.ndarray) -> list[TranscriptionSegment]:
         """
         Transcrit un buffer audio avec Faster-Whisper.
+        Sépare les canaux stéréo pour identifier le locuteur (Gauche=VOUS, Droite=CLIENT).
         
         Args:
-            audio_data: Données audio (numpy array, float32, 16kHz mono)
+            audio_data: Données audio (numpy array, float32, peut être stéréo 48kHz)
         
         Returns:
-            Liste de segments transcrits.
+            Liste de segments transcrits avec préfixe locuteur et couleur.
         """
         if self.model is None:
             self.logger.error("Model not loaded")
             return []
         
         try:
+            speaker_tag = ""
+            speaker_color = ""
+            
+            if len(audio_data.shape) == 1:
+                data = audio_data.reshape(-1, 2)
+            else:
+                data = audio_data
+            
+            if data.shape[1] == 2:
+                left_channel = data[:, 0]
+                right_channel = data[:, 1]
+                
+                energy_left = np.sum(left_channel**2)
+                energy_right = np.sum(right_channel**2)
+                
+                if energy_left > energy_right:
+                    speaker_tag = "VOUS"
+                    speaker_color = "GREEN"
+                    processed_audio = left_channel
+                else:
+                    speaker_tag = "CLIENT"
+                    speaker_color = "CYAN"
+                    processed_audio = right_channel
+                
+                self.logger.debug(f"Speaker: {speaker_tag} (E_L={energy_left:.2f}, E_R={energy_right:.2f})")
+            else:
+                processed_audio = data.flatten()
+            
+            if self.config.audio.sample_rate != 16000:
+                original_length = len(processed_audio)
+                target_length = int(original_length * 16000 / self.config.audio.sample_rate)
+                indices = np.linspace(0, original_length - 1, target_length)
+                processed_audio = np.interp(indices, np.arange(original_length), processed_audio)
+            
+            processed_audio = processed_audio.astype(np.float32)
+            
             segments, info = self.model.transcribe(
-                audio_data,
-                language=self.config.transcription.language,
-                task=self.config.transcription.task,
+                processed_audio,
+                language="fr",
+                task="transcribe",
                 beam_size=self.config.transcription.beam_size,
                 vad_filter=self.config.transcription.vad_filter,
-                initial_prompt=self.config.transcription.initial_prompt
+                initial_prompt=self.config.transcription.initial_prompt,
+                condition_on_previous_text=True,
+                temperature=0.0,
+                compression_ratio_threshold=2.4,
+                log_prob_threshold=-1.0,
+                no_speech_threshold=0.6
             )
             
             results = []
             for segment in segments:
+                text = segment.text.strip()
+                if speaker_tag:
+                    text = f"[{speaker_tag}]|{speaker_color}|{text}"
+                
                 results.append(TranscriptionSegment(
-                    text=segment.text.strip(),
+                    text=text,
                     start=segment.start,
                     end=segment.end,
                     confidence=segment.avg_logprob if hasattr(segment, 'avg_logprob') else 0.0,
-                    language=info.language if hasattr(info, 'language') else self.config.transcription.language
+                    language="fr"
                 ))
             
             return results

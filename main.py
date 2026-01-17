@@ -20,11 +20,16 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
+import os
+
+from colorama import init, Fore, Style
 
 from config.manager import get_config
 from core.audio_streamer import AudioStreamer, AudioChunk
 from core.transcriber_new import get_transcriber, TranscriptionSegment
 from core.processor import get_processor, ProcessedTranscription
+
+init(autoreset=True)
 
 
 class TheCloserPro:
@@ -55,14 +60,11 @@ class TheCloserPro:
         
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
-        
-        self.logger.info("="*70)
-        self.logger.info("THE CLOSER PRO - Version 1.0.0 (Genesis)")
-        self.logger.info("="*70)
     
     def _setup_logging(self) -> logging.Logger:
         """
         Configure le système de logging.
+        Redirige les logs techniques vers un fichier, garde seulement l'UI propre.
         
         Returns:
             Logger configuré
@@ -70,13 +72,20 @@ class TheCloserPro:
         log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         log_level = getattr(logging, self.config.system.log_level.upper(), logging.INFO)
         
+        log_file = Path('system.log')
+        
         logging.basicConfig(
             level=log_level,
             format=log_format,
             handlers=[
-                logging.StreamHandler(sys.stdout)
+                logging.FileHandler(log_file, mode='w', encoding='utf-8')
             ]
         )
+        
+        logging.getLogger('faster_whisper').setLevel(logging.WARNING)
+        logging.getLogger('core.audio_streamer').setLevel(logging.WARNING)
+        logging.getLogger('core.transcriber_new').setLevel(logging.WARNING)
+        logging.getLogger('core.processor').setLevel(logging.WARNING)
         
         return logging.getLogger(__name__)
     
@@ -88,9 +97,7 @@ class TheCloserPro:
             signum: Numéro du signal
             frame: Frame d'exécution
         """
-        self.logger.info("\n" + "="*70)
-        self.logger.info("SIGNAL D'ARRÊT REÇU (Ctrl+C)")
-        self.logger.info("="*70)
+        print(f"\n\n{Fore.RED}[STOP]{Style.RESET_ALL} Arrêt demandé...")
         self.stop()
         sys.exit(0)
     
@@ -175,23 +182,38 @@ class TheCloserPro:
     
     def _output_transcription(self, text: str):
         """
-        Affiche et sauvegarde une transcription.
+        Affiche et sauvegarde une transcription avec interface chat colorée.
+        Format: [HH:MM:SS] [SPEAKER] -> "texte"
         
         Args:
-            text: Texte transcrit à afficher
+            text: Texte transcrit (format: [SPEAKER]|COLOR|texte)
         """
         timestamp = datetime.now().strftime("%H:%M:%S")
-        formatted_line = f"[{timestamp}] {text}"
         
-        if self.config.system.output_format in ["console", "both"]:
-            print(f"\n{formatted_line}", flush=True)
-        
-        if self.config.system.output_format in ["file", "both"] and self._output_file:
-            try:
-                with open(self._output_file, 'a', encoding='utf-8') as f:
-                    f.write(formatted_line + "\n")
-            except Exception as e:
-                self.logger.error(f"Erreur d'écriture dans le fichier: {e}")
+        if "|" in text:
+            parts = text.split("|")
+            if len(parts) == 3:
+                speaker = parts[0]
+                color = parts[1]
+                message = parts[2]
+                
+                color_code = Fore.GREEN if color == "GREEN" else Fore.CYAN
+                
+                formatted_line = f"[{timestamp}] {color_code}{speaker}{Style.RESET_ALL} -> \"{message}\""
+                
+                print(formatted_line, flush=True)
+                
+                if self._output_file:
+                    try:
+                        plain_line = f"[{timestamp}] {speaker} -> \"{message}\""
+                        with open(self._output_file, 'a', encoding='utf-8') as f:
+                            f.write(plain_line + "\n")
+                    except Exception as e:
+                        self.logger.error(f"Erreur d'écriture dans le fichier: {e}")
+            else:
+                print(f"[{timestamp}] {text}", flush=True)
+        else:
+            print(f"[{timestamp}] {text}", flush=True)
     
     def start(self):
         """
@@ -204,32 +226,33 @@ class TheCloserPro:
             raise RuntimeError("THE CLOSER PRO est déjà en cours d'exécution")
         
         try:
-            self.logger.info("Validation de la configuration...")
-            self.config.validate()
+            os.system('cls' if os.name == 'nt' else 'clear')
             
-            self.logger.info("Configuration du fichier de sortie...")
+            print(f"{Fore.CYAN}" + "="*70)
+            print(f"{Fore.CYAN}╔═══════════════════════════════════════════════════════════════════╗")
+            print(f"{Fore.CYAN}║{Fore.WHITE}                    THE CLOSER PRO - v1.0.0                        {Fore.CYAN}║")
+            print(f"{Fore.CYAN}║{Fore.WHITE}           Transcription Temps Réel - Interface Chat             {Fore.CYAN}║")
+            print(f"{Fore.CYAN}╚═══════════════════════════════════════════════════════════════════╝")
+            print(f"{Fore.CYAN}" + "="*70 + Style.RESET_ALL)
+            print()
+            
+            self.config.validate()
             self._setup_output_file()
             
-            self.logger.info("Démarrage du transcriber...")
+            print(f"{Fore.YELLOW}[INIT]{Style.RESET_ALL} Chargement du modèle Whisper...")
             self.transcriber.start()
             
-            self.logger.info("Démarrage de l'audio streamer...")
+            print(f"{Fore.YELLOW}[INIT]{Style.RESET_ALL} Démarrage de la capture audio...")
             self.audio_streamer = AudioStreamer(callback=self._audio_callback)
             self.audio_streamer.start()
             
             self._is_running = True
             self._session_start_time = datetime.now()
             
-            self.logger.info("="*70)
-            self.logger.info("SYSTÈME OPÉRATIONNEL - PRÊT POUR LE CLOSING")
-            self.logger.info("="*70)
-            self.logger.info(f"Modèle: {self.config.transcription.model_name}")
-            self.logger.info(f"Device: {self.config.transcription.device} ({self.config.transcription.compute_type})")
-            self.logger.info(f"Audio: Device ID {self.config.audio.device_id} @ {self.config.audio.sample_rate}Hz")
-            self.logger.info(f"Langue: {self.config.transcription.language.upper()}")
-            self.logger.info("="*70)
-            self.logger.info("Parlez maintenant... (Ctrl+C pour arrêter)")
-            self.logger.info("="*70 + "\n")
+            print(f"{Fore.GREEN}[READY]{Style.RESET_ALL} Système opérationnel - Parlez maintenant !")
+            print(f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} Appuyez sur Ctrl+C pour arrêter\n")
+            print(f"{Fore.CYAN}" + "─"*70 + Style.RESET_ALL)
+            print()
             
         except Exception as e:
             self.logger.error(f"Échec du démarrage: {e}", exc_info=True)
@@ -241,28 +264,21 @@ class TheCloserPro:
         if not self._is_running:
             return
         
-        self.logger.info("\n" + "="*70)
-        self.logger.info("ARRÊT DU SYSTÈME EN COURS...")
-        self.logger.info("="*70)
-        
         self._is_running = False
         
         if self._audio_buffer:
-            self.logger.info("Traitement du buffer audio restant...")
             self._process_buffer()
         
         if self.audio_streamer:
-            self.logger.info("Arrêt de l'audio streamer...")
             self.audio_streamer.stop()
         
-        self.logger.info("Arrêt du transcriber...")
         self.transcriber.stop()
         
         self._print_session_stats()
         
-        self.logger.info("="*70)
-        self.logger.info("SYSTÈME ARRÊTÉ - SESSION TERMINÉE")
-        self.logger.info("="*70)
+        print(f"\n{Fore.GREEN}[DONE]{Style.RESET_ALL} Session terminée.")
+        if self._output_file:
+            print(f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} Transcription sauvegardée: {self._output_file}\n")
     
     def _print_session_stats(self):
         """Affiche les statistiques de la session."""
@@ -270,32 +286,22 @@ class TheCloserPro:
             duration = datetime.now() - self._session_start_time
             duration_str = str(duration).split('.')[0]
             
-            self.logger.info("\n" + "="*70)
-            self.logger.info("STATISTIQUES DE SESSION")
-            self.logger.info("="*70)
-            self.logger.info(f"Durée: {duration_str}")
-            self.logger.info(f"Segments transcrits: {self._total_segments_processed}")
-            self.logger.info(f"Segments valides: {self._total_valid_segments}")
+            print(f"\n{Fore.CYAN}" + "─"*70 + Style.RESET_ALL)
+            print(f"{Fore.CYAN}STATISTIQUES DE SESSION{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}" + "─"*70 + Style.RESET_ALL)
+            print(f"Durée: {duration_str}")
+            print(f"Segments transcrits: {self._total_segments_processed}")
+            print(f"Segments valides: {self._total_valid_segments}")
             
             if self._total_segments_processed > 0:
                 valid_rate = (self._total_valid_segments / self._total_segments_processed) * 100
-                self.logger.info(f"Taux de validité: {valid_rate:.1f}%")
+                print(f"Taux de validité: {valid_rate:.1f}%")
             
             if self.audio_streamer:
                 audio_stats = self.audio_streamer.get_stats()
-                self.logger.info(f"Chunks audio: {audio_stats['total_chunks']}")
-                self.logger.info(f"Perte audio: {audio_stats['loss_rate_percent']:.2f}%")
+                print(f"Perte audio: {audio_stats['loss_rate_percent']:.2f}%")
             
-            transcriber_stats = self.transcriber.get_stats()
-            self.logger.info(f"Temps d'inférence moyen: {transcriber_stats['avg_inference_time']:.2f}s")
-            
-            if 'vram_allocated_gb' in transcriber_stats:
-                self.logger.info(f"VRAM utilisée: {transcriber_stats['vram_allocated_gb']:.2f} GB")
-            
-            if self._output_file:
-                self.logger.info(f"Transcription sauvegardée: {self._output_file}")
-            
-            self.logger.info("="*70)
+            print(f"{Fore.CYAN}" + "─"*70 + Style.RESET_ALL)
     
     def run(self):
         """

@@ -35,6 +35,9 @@ rapidfuzz==3.6.1
 # Configuration et logging
 pyyaml==6.0.1
 
+# Terminal colors for chat UI
+colorama==0.4.6
+
 # ============================================================================
 # INSTALLATION NOTES
 # ============================================================================
